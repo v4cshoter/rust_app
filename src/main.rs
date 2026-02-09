@@ -1,10 +1,13 @@
 use amqprs::connection::{Connection, OpenConnectionArguments};
-use amqprs::channel::{Channel, BasicPublishArguments, BasicConsumeArguments};
-use amqprs::callbacks::{DefaultChannelCallback, DefaultConnectionCallback};
+use amqprs::channel::{
+    BasicConsumeArguments, BasicPublishArguments, 
+    Channel, ExchangeType, ExchangeDeclareArguments, 
+    QueueDeclareArguments, QueueBindArguments};
 use amqprs::consumer::AsyncConsumer;
 use amqprs::{BasicProperties, Deliver};
 use async_trait::async_trait;
 use tokio;
+use anyhow::Context;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -16,26 +19,45 @@ async fn main() -> anyhow::Result<()> {
         "guest",
     ))
     .await
-    .unwrap();
-    conn
-        .register_callback(DefaultConnectionCallback)
-        .await
-        .unwrap();
-    println!("Connected to RabbitMQ");
+    .with_context(|| "Failed to connect to RabbitMQ")?;
 
-    let channel = conn.open_channel(None).await.unwrap();
-    channel
-        .register_callback(DefaultChannelCallback)
+    let channel = conn
+        .open_channel(None)
         .await
+        .with_context(|| "Failed to open channel")?;
+    
+    channel
+        .exchange_declare(ExchangeDeclareArguments {
+            exchange: "my_exchange".to_string(),
+            exchange_type: ExchangeType::Direct.to_string(),
+            ..Default::default()
+            }
+        )
+        .await
+        .with_context(|| "failed to declare exchange")?;
+    
+    channel
+        .queue_declare(QueueDeclareArguments::new("rpc_request_queue"))
+        .await
+        .with_context(|| "Failed to declare queue")?
         .unwrap();
-    println!("Channel opened");
+
+    channel.queue_bind(
+        QueueBindArguments::new(
+            "rpc_request_queue",
+            "my_exchange",
+            "rpc",
+        )
+    ).await?;
 
     channel
         .basic_consume(
             RpcConsumer { channel: channel.clone() },
             BasicConsumeArguments::new("rpc_request_queue", "my_consumer"),
         )
-        .await?;
+        .await
+        .context("failed to start consuming from rpc_request_queue")?;
+
     println!("Waiting for messages...");
 
     tokio::signal::ctrl_c().await?;
