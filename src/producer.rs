@@ -1,8 +1,18 @@
 use amqprs::connection::{Connection, OpenConnectionArguments};
-use amqprs::channel::{BasicPublishArguments};
+use amqprs::channel::BasicPublishArguments;
 use amqprs::BasicProperties;
 use anyhow::Context;
 use tokio;
+use serde::{Serialize};
+use serde_json::json;
+
+#[derive(Serialize)]
+struct JsonRpcRequest {
+    jsonrpc: String,
+    method: String,
+    params: Option<serde_json::Value>,
+    id: Option<serde_json::Value>,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,16 +30,26 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| "Failed to open channel")?;
 
-    let payload = b"Hello from producer!".to_vec();
     let reply_to_queue = "rpc_reply_queue";
 
-    let publish_args = BasicPublishArguments::new("", "rpc_request_queue");
+    let requests = vec![
+        JsonRpcRequest { jsonrpc: "2.0".to_string(), method: "ping".to_string(), params: None, id: Some(json!(1)) },
+        JsonRpcRequest { jsonrpc: "2.0".to_string(), method: "echo".to_string(), params: Some(json!("Hello RPC!")), id: Some(json!(2)) },
+        JsonRpcRequest { jsonrpc: "2.0".to_string(), method: "add".to_string(), params: Some(json!({"a": 3, "b": 7})), id: Some(json!(3)) },
+    ];
 
-    let mut properties = BasicProperties::default();
-    let properties = properties.with_reply_to(reply_to_queue).clone();
-    channel.basic_publish(properties, payload, publish_args).await?;
+    for req in requests {
+        let payload = serde_json::to_vec(&req)?;
 
-    println!("Message sent to rpc_request_queue with reply_to={}", reply_to_queue);
+        let mut properties = BasicProperties::default();
+        properties.with_reply_to(reply_to_queue);
+
+        let publish_args = BasicPublishArguments::new("my_exchange", "rpc");
+
+        channel.basic_publish(properties, payload, publish_args).await?;
+
+        println!("Sent {} request", req.method);
+    }
 
     Ok(())
 }
