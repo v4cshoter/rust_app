@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "consumer"
+name = "main"
 path = "src/main.rs"
 
 [[bin]]
-name = "producer"
-path = "src/producer.rs"
+name = "helper"
+path = "src/helper.rs"
 
 [dependencies]
 amqprs = "2.1.3"
