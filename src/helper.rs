@@ -9,6 +9,9 @@ async fn main() -> anyhow::Result<()> {
     produce("ping", None, Some(json!(1))).await?;
     produce("echo", Some(json!({"msg": "hello"})), Some(json!(2))).await?;
     produce("add", Some(json!({"a": 4, "b": 4})), Some(json!(3))).await?;
+    produce("ping", None, Some(json!(1))).await?;
+    produce("echo", Some(json!({"msg": "hello"})), Some(json!(2))).await?;
+    produce("add", Some(json!({"a": 4, "b": 4})), Some(json!(3))).await?;
 
     Ok(())
 }
