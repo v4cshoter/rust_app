@@ -1,14 +1,16 @@
 use crate::routing;
 use amqprs::connection::{Connection, OpenConnectionArguments};
 use amqprs::channel::{
-    BasicAckArguments, BasicConsumeArguments, BasicPublishArguments, BasicQosArguments, Channel, ExchangeDeclareArguments, ExchangeType, QueueBindArguments, QueueDeclareArguments
+    BasicConsumeArguments, Channel, ExchangeType, ExchangeDeclareArguments,
+    QueueDeclareArguments, QueueBindArguments, BasicPublishArguments,
+    BasicAckArguments, BasicQosArguments,
 };
 use amqprs::consumer::AsyncConsumer;
 use amqprs::{BasicProperties, Deliver};
 use anyhow::Context;
 use serde_json::json;
 use tokio::time::{sleep, Duration};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, Mutex};
 use std::sync::Arc;
 
 const MAX_CONCURRENT: u16 = 3;
@@ -46,13 +48,15 @@ pub async fn start() -> anyhow::Result<()> {
         "rpc",
     )).await?;
 
-    let semaphore = Arc::new(Semaphore::new(3));
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT as usize));
+    let counter = Arc::new(Mutex::new(0u64));
 
     channel
         .basic_consume(
             RpcConsumer {
                 channel: channel.clone(),
                 semaphore,
+                counter,
             },
             BasicConsumeArguments::new("rpc_request_queue", "my_consumer"),
         )
@@ -67,6 +71,7 @@ pub async fn start() -> anyhow::Result<()> {
 struct RpcConsumer {
     channel: Channel,
     semaphore: Arc<Semaphore>,
+    counter: Arc<Mutex<u64>>,
 }
 
 #[async_trait::async_trait]
@@ -80,6 +85,7 @@ impl AsyncConsumer for RpcConsumer {
     ) {
         let semaphore = self.semaphore.clone();
         let channel = self.channel.clone();
+        let counter = self.counter.clone();
 
         tokio::spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
@@ -88,6 +94,12 @@ impl AsyncConsumer for RpcConsumer {
             println!("Processing message: {}", message);
 
             sleep(Duration::from_secs(3)).await;
+
+            {
+                let mut count = counter.lock().await;
+                *count += 1;
+                println!("Total processed: {}", *count);
+            }
 
             let request: serde_json::Result<crate::routing::JsonRpcRequest> =
                 serde_json::from_str(&message);
